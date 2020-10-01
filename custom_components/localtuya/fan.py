@@ -81,36 +81,36 @@ class LocaltuyaFan(LocalTuyaEntity, FanEntity):
         """Get the list of available speeds."""
         return [SPEED_OFF, SPEED_LOW, SPEED_MEDIUM, SPEED_HIGH]
 
-    def turn_on(self, speed: str = None, **kwargs) -> None:
+    async def async_turn_on(self, speed: str = None, **kwargs) -> None:
         """Turn on the entity."""
-        self._device.set_dps(True, "1")
+        await self._device.set_dps(True, "1")
         if speed is not None:
-            self.set_speed(speed)
+            await self.async_set_speed(speed)
         else:
             self.schedule_update_ha_state()
 
-    def turn_off(self, **kwargs) -> None:
+    async def async_turn_off(self, **kwargs) -> None:
         """Turn off the entity."""
-        self._device.set_dps(False, "1")
+        await self._device.set_dps(False, "1")
         self.schedule_update_ha_state()
 
-    def set_speed(self, speed: str) -> None:
+    async def async_set_speed(self, speed: str) -> None:
         """Set the speed of the fan."""
         self._speed = speed
         if speed == SPEED_OFF:
-            self._device.set_dps(False, "1")
+            await self._device.set_dps(False, "1")
         elif speed == SPEED_LOW:
-            self._device.set_dps("1", "2")
+            await self._device.set_dps("1", "2")
         elif speed == SPEED_MEDIUM:
-            self._device.set_dps("2", "2")
+            await self._device.set_dps("2", "2")
         elif speed == SPEED_HIGH:
-            self._device.set_dps("3", "2")
+            await self._device.set_dps("3", "2")
         self.schedule_update_ha_state()
 
-    def oscillate(self, oscillating: bool) -> None:
+    async def async_oscillate(self, oscillating: bool) -> None:
         """Set oscillation."""
         self._oscillating = oscillating
-        self._device.set_value("8", oscillating)
+        await self._device.set_value("8", oscillating)
         self.schedule_update_ha_state()
 
     @property
@@ -120,13 +120,13 @@ class LocaltuyaFan(LocalTuyaEntity, FanEntity):
 
     def status_updated(self):
         """Get state of Tuya fan."""
-        self._is_on = self._status["dps"]["1"]
-        if not self._status["dps"]["1"]:
+        self._is_on = self.dps(self._dps_id)
+        if not self._is_on:
             self._speed = SPEED_OFF
-        elif self._status["dps"]["2"] == "1":
+        elif self.dps(2) == "1":
             self._speed = SPEED_LOW
-        elif self._status["dps"]["2"] == "2":
+        elif self.dps(2) == "2":
             self._speed = SPEED_MEDIUM
-        elif self._status["dps"]["2"] == "3":
+        elif self.dps(2) == "3":
             self._speed = SPEED_HIGH
-        self._oscillating = self._status["dps"]["8"]
+        self._oscillating = self.dps(8)

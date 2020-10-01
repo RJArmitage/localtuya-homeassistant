@@ -105,12 +105,12 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
             supports = supports | SUPPORT_COLOR
         return supports
 
-    def turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs):
         """Turn on or control the light."""
-        self._device.set_dps(True, self._dps_id)
+        await self._device.set_dps(True, self._dps_id)
 
         if ATTR_BRIGHTNESS in kwargs:
-            self._device.set_dps(
+            await self._device.set_dps(
                 max(int(kwargs[ATTR_BRIGHTNESS]), 25), DPS_INDEX_BRIGHTNESS
             )
 
@@ -123,11 +123,11 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
                 - (255 / (MAX_MIRED - MIN_MIRED))
                 * (int(kwargs[ATTR_COLOR_TEMP]) - MIN_MIRED)
             )
-            self._device.set_dps(color_temp, DPS_INDEX_COLOURTEMP)
+            await self._device.set_dps(color_temp, DPS_INDEX_COLOURTEMP)
 
-    def turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs):
         """Turn Tuya light off."""
-        self._device.set_dps(False, self._dps_id)
+        await self._device.set_dps(False, self._dps_id)
 
     def status_updated(self):
         """Device status was updated."""
