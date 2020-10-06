@@ -1,7 +1,7 @@
 """Code shared between all platforms."""
 import logging
 from time import time, sleep
-from threading import Lock
+from threading import (Lock, current_thread)
 
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.dispatcher import (
@@ -22,6 +22,8 @@ from . import pytuya
 from .const import CONF_LOCAL_KEY, CONF_PROTOCOL_VERSION, DOMAIN, TUYA_DEVICE
 
 _LOGGER = logging.getLogger(__name__)
+
+REFRESH_SECS = 600
 
 
 def prepare_setup_entities(hass, config_entry, platform):
@@ -52,8 +54,11 @@ class TuyaDevice:
 
     def __init__(self, hass, config_entry):
         """Initialize the cache."""
-        self._cached_status = ""
+        self._cached_status = {"dps": {config_entry[CONF_DEVICE_ID]: True}}
+        # self._cached_status = ""
         self._cached_status_time = 0
+        # Set the cache as populated so that we don't block the main thread when initialising
+        self._cached_status_time = time()
         self._interface = pytuya.TuyaInterface(
             config_entry[CONF_DEVICE_ID],
             config_entry[CONF_HOST],
@@ -79,18 +84,21 @@ class TuyaDevice:
                 status = self._interface.status()
                 return status
             except Exception as e:
-                print(
-                    "Failed to update status of device [{}]: [{}]".format(
-                        self._interface.address, e
-                    )
-                )
+                # print(
+                #     "Failed to update status of device [{}]: [{}]".format(
+                #         self._interface.address, e
+                #     )
+                # )
                 sleep(1.0)
                 if i + 1 == 3:
                     _LOGGER.error(
                         "Failed to update status of device %s", self._interface.address
                     )
-                    #                    return None
-                    raise ConnectionError("Failed to update status .")
+                    return None
+                    # raise ConnectionError("Failed to update status .")
+        return None
+        # return {"dps": {}}
+        # return {"dps": self._cached_status["dps"]}
 
     def set_dps(self, state, dps_index):
         """Change value of a DP of the Tuya device and update the cached status."""
@@ -120,19 +128,61 @@ class TuyaDevice:
 
     #                    raise ConnectionError("Failed to set status.")
 
+    def set_dps_set(self, dps):
+        """Change value of a DP of the Tuya device and update the cached status."""
+        # _LOGGER.info("running def set_dps from TuyaDevice")
+        # No need to clear the cache here: let's just update the status of the
+        # changed dps as returned by the interface (see 5 lines below)
+        # self._cached_status = ""
+        # self._cached_status_time = 0
+        for i in range(5):
+            try:
+                result = self._interface.exchange('set', dps)
+                self._cached_status["dps"].update(result["dps"])
+                signal = f"localtuya_{self._interface.id}"
+                async_dispatcher_send(self._hass, signal, self._cached_status)
+                return
+            except Exception as e:
+                print(
+                    "Failed to set status of device [{}]: [{}]".format(
+                        self._interface.address, e
+                    )
+                )
+                if i + 1 == 3:
+                    _LOGGER.error(
+                        "Failed to set status of device %s", self._interface.address
+                    )
+                    return
+
+    #                    raise ConnectionError("Failed to set status.")
+
     def status(self):
         """Get the state of the Tuya device and cache the results."""
-        _LOGGER.debug("running def status(self) from TuyaDevice")
-        self._lock.acquire()
-        try:
+        if current_thread().name == "MainThread":
+            _LOGGER.debug(
+                "skipping def status(self) from TuyaDevice on MainThread")
+        else:
             now = time()
-            if not self._cached_status or now - self._cached_status_time > 10:
-                sleep(0.5)
-                self._cached_status = self.__get_status()
+            if not self._cached_status or now - self._cached_status_time >= REFRESH_SECS:
+                _LOGGER.debug("running def status(self) from TuyaDevice")
                 self._cached_status_time = time()
-            return self._cached_status
-        finally:
-            self._lock.release()
+                self._lock.acquire()
+                try:
+                    sleep(0.5)
+                    _LOGGER.debug("Starting periodic update of cached status")
+                    # Set cache as updated now so that we don't keep spamming ourselves on other threads
+                    self._cached_status_time = now
+                    self._cached_status = self.__get_status()
+                    if self._cached_status is None:
+                        self._cached_status = {"dps": {}}
+
+                    # self._cached_status_time = time()
+                finally:
+                    self._lock.release()
+            else:
+                _LOGGER.debug(
+                    "skipping periodic def status(self) from TuyaDevice")
+        return self._cached_status
 
 
 class LocalTuyaEntity(Entity):

@@ -23,6 +23,11 @@ CONF_SPAN_TIME = "span_time"
 # sensor
 CONF_SCALING = "scaling"
 
+# light
+CONF_MIN_MIRED = "min_mired"
+CONF_MAX_MIRED = "max_mired"
+CONF_ISCOLOR = "is_color"
+
 DOMAIN = "localtuya"
 
 # Platforms in this list must support config flows

@@ -129,7 +129,8 @@ def pack_message(msg):
     )
 
     # Calculate CRC, add it together with suffix
-    buffer += struct.pack(MESSAGE_END_FMT, binascii.crc32(buffer), SUFFIX_VALUE)
+    buffer += struct.pack(MESSAGE_END_FMT,
+                          binascii.crc32(buffer), SUFFIX_VALUE)
 
     return buffer
 
@@ -153,7 +154,8 @@ class AESCipher:
     def __init__(self, key):
         """Initialize a new AESCipher."""
         self.bs = 16
-        self.cipher = Cipher(algorithms.AES(key), modes.ECB(), default_backend())
+        self.cipher = Cipher(algorithms.AES(
+            key), modes.ECB(), default_backend())
 
     def encrypt(self, raw, use_base64=True):
         """Encrypt data to be sent to device."""
@@ -175,7 +177,7 @@ class AESCipher:
 
     @staticmethod
     def _unpad(s):
-        return s[: -ord(s[len(s) - 1 :])]
+        return s[: -ord(s[len(s) - 1:])]
 
 
 class TuyaInterface:
@@ -209,7 +211,8 @@ class TuyaInterface:
 
     def exchange(self, command, dps=None):
         """Send and receive a message, returning response from device."""
-        _LOGGER.debug("Sending command %s (device type: %s)", command, self.dev_type)
+        _LOGGER.debug("Sending command %s (device type: %s)",
+                      command, self.dev_type)
         payload = self._generate_payload(command, dps)
         dev_type = self.dev_type
 
@@ -241,7 +244,11 @@ class TuyaInterface:
 
     def status(self):
         """Return device status."""
-        return self.exchange(STATUS)
+        try:
+            return self.exchange(STATUS)
+        except Exception as e:
+            self.dev_type = "type_0a"
+            raise
 
     def set_dps(self, value, dps_index):
         """
@@ -265,17 +272,18 @@ class TuyaInterface:
         for dps_range in ranges:
             # dps 1 must always be sent, otherwise it might fail in case no dps is found
             # in the requested range
-            self.dps_to_request = {"1": None}
-            self.add_dps_to_request(range(*dps_range))
+            self.dps_to_request = {}
+            # self.dps_to_request = {"1": None}
+            # self.add_dps_to_request(range(*dps_range))
             try:
                 data = self.status()
+                detected_dps.update(data["dps"])
+
+                if self.dev_type == "type_0a":
+                    return detected_dps
             except Exception as e:
                 _LOGGER.warning("Failed to get status: %s", e)
-                raise
-            detected_dps.update(data["dps"])
-
-            if self.dev_type == "type_0a":
-                return detected_dps
+#                raise
 
         return detected_dps
 
@@ -284,13 +292,15 @@ class TuyaInterface:
         if isinstance(dps_index, int):
             self.dps_to_request[str(dps_index)] = None
         else:
-            self.dps_to_request.update({str(index): None for index in dps_index})
+            self.dps_to_request.update(
+                {str(index): None for index in dps_index})
 
     def _decode_payload(self, payload):
         _LOGGER.debug("decode payload=%r", payload)
 
         if payload.startswith(PROTOCOL_VERSION_BYTES_31):
-            payload = payload[len(PROTOCOL_VERSION_BYTES_31) :]  # remove version header
+            # remove version header
+            payload = payload[len(PROTOCOL_VERSION_BYTES_31):]
             # remove (what I'm guessing, but not confirmed is) 16-bytes of MD5
             # hexdigest of payload
             payload = self.cipher.decrypt(payload[16:])
@@ -298,7 +308,7 @@ class TuyaInterface:
             if self.dev_type != "type_0a" or payload.startswith(
                 PROTOCOL_VERSION_BYTES_33
             ):
-                payload = payload[len(PROTOCOL_33_HEADER) :]
+                payload = payload[len(PROTOCOL_33_HEADER):]
             payload = self.cipher.decrypt(payload, False)
 
             if "data unvalid" in payload:
@@ -341,8 +351,10 @@ class TuyaInterface:
 
         if data is not None:
             json_data["dps"] = data
-        if command_hb == 0x0D:
-            json_data["dps"] = self.dps_to_request
+        else:
+            json_data["dps"] = {"schema": True}
+        # if command_hb == 0x0D:
+        #     json_data["dps"] = self.dps_to_request
 
         payload = json.dumps(json_data).replace(" ", "").encode("utf-8")
         _LOGGER.debug("paylod=%r", payload)
