@@ -18,6 +18,7 @@ from homeassistant.components.light import (
 from .common import LocalTuyaEntity, prepare_setup_entities
 
 _LOGGER = logging.getLogger(__name__)
+_STATE = logging.getLogger(__name__ + ".state")
 
 SET = "set"
 
@@ -179,7 +180,10 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
 
         if ATTR_COLOR_TEMP in kwargs and self._min_mireds is not None and self._max_mireds is not None:
             self._mode = MODE_WHITE
-            self._color_temp = int(kwargs[ATTR_COLOR_TEMP])
+            color_temp = int(kwargs[ATTR_COLOR_TEMP])
+            color_temp = max(color_temp, self._min_mireds)
+            color_temp = min(color_temp, self._max_mireds)
+            self._color_temp = color_temp
             self._hs_color = [0, 0]
 
         if ATTR_HS_COLOR in kwargs:
@@ -194,12 +198,15 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
             normalised_mireds = self._color_temp - self._min_mireds
             color_temp = int(
                 round(255 - normalised_mireds / mireds_range * 255))
-            dps[DPS_INDEX_COLOURTEMP] = color_temp
+            dps = {}
+            dps[self._dps_id] = True
+            dps[DPS_INDEX_MODE] = self._mode
             dps[DPS_INDEX_BRIGHTNESS] = self._brightness
+            dps[DPS_INDEX_COLOURTEMP] = color_temp
 
-            _LOGGER.debug("Setting white mode"
-                          + ", brightness = " + str(self._brightness)
-                          + ", color_temp = " + str(color_temp))
+            _STATE.info("Setting white mode"
+                        + ", brightness = " + str(self._brightness)
+                        + ", color_temp = " + str(color_temp))
         else:
             lightness = int(
                 round(self._brightness / MAX_BRIGHTNESS * MAX_LIGHTNESS))
@@ -216,16 +223,18 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
             v = format(lightness, "02x")
 
             hexvalue = red + green + blue + h + s + v
+
+            dps = {}
+            dps[self._dps_id] = True
+            dps[DPS_INDEX_MODE] = self._mode
             dps[DPS_INDEX_COLOUR] = hexvalue
 
-            _LOGGER.debug("Setting color mode"
-                          + ", hs_colour = " + str(self._hs_color)
-                          + ", brightness = " + str(self._brightness)
-                          + ", hexvalue = " + hexvalue
-                          + ", lightness = " + str(lightness))
+            _STATE.info("Setting color mode"
+                        + ", hs_colour = " + str(self._hs_color)
+                        + ", brightness = " + str(self._brightness)
+                        + ", hexvalue = " + hexvalue
+                        + ", lightness = " + str(lightness))
 
-        dps[DPS_INDEX_MODE] = self._mode
-        dps[self._dps_id] = True
         self._device.set_dps_set(dps)
 
     def turn_off(self, **kwargs):
@@ -234,6 +243,7 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
 
     def status_updated(self):
         """Device status was updated."""
+        _STATE.info("Refreshing " + str(self.dps))
         state = self.dps(self._dps_id)
         if state is not None:
             self._state = state
@@ -244,28 +254,30 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
         if mode is not None:
             self._mode = mode
 
-        if mode == MODE_WHITE:
-            color_temp = self.dps(DPS_INDEX_COLOURTEMP)
+        color_temp = self.dps(DPS_INDEX_COLOURTEMP)
+        brightness = self.dps(DPS_INDEX_BRIGHTNESS)
+        if color_temp is not None or brightness is not None:
             if color_temp is not None and self._min_mireds is not None and self._max_mireds is not None:
                 color_temp = 255 - color_temp
                 mireds_range = self._max_mireds - self._min_mireds
                 self._color_temp = int(
                     round(color_temp / 255 * mireds_range + self._min_mireds))
 
-            brightness = self.dps(DPS_INDEX_BRIGHTNESS)
             if brightness is not None:
                 brightness = int(brightness)
                 brightness = min(MAX_BRIGHTNESS, brightness)
                 brightness = max(MIN_BRIGHTNESS, brightness)
-                self._brightness = brightness
 
-            _LOGGER.debug("Refreshed white mode"
-                          + ", color_temp = " + str(self._color_temp)
-                          + ", brightness = " + str(self._brightness))
+                if self._mode == MODE_WHITE:
+                    self._brightness = brightness
 
-        elif mode == MODE_COLOR:
-            color_str = self.dps(DPS_INDEX_COLOUR)
+            _STATE.info("Refreshed white info"
+                        + ", mode = " + str(self._mode)
+                        + ", color_temp = " + str(self._color_temp)
+                        + ", brightness = " + str(self._brightness))
 
+        color_str = self.dps(DPS_INDEX_COLOUR)
+        if color_str is not None:
             red = int(color_str[0: 2], 16)
             green = int(color_str[2: 4], 16)
             blue = int(color_str[4: 6], 16)
@@ -275,9 +287,11 @@ class LocaltuyaLight(LocalTuyaEntity, LightEntity):
             brightness = min(brightness, MAX_BRIGHTNESS)
             brightness = max(brightness, MIN_BRIGHTNESS)
 
-            self._brightness = brightness
             self._hs_color = color_util.color_RGB_to_hs(red, green, blue)
+            if self._mode == MODE_COLOR:
+                self._brightness = brightness
 
-            _LOGGER.debug("Refreshed color mode"
-                          + ", hs_color = " + str(self._hs_color)
-                          + ", brightness = " + str(self._brightness))
+            _STATE.info("Refreshed color info"
+                        + ", mode = " + str(self._mode)
+                        + ", hs_color = " + str(self._hs_color)
+                        + ", brightness = " + str(self._brightness))
